@@ -5,18 +5,22 @@ import (
 	"time"
 )
 
-const MJD_0 float64 = 2400000.5
-const MJD_JD2000 float64 = 51544.5
+const (
+	// Mjd0 ...
+	Mjd0 float64 = 2400000.5
+	// MjdJd2000 ...
+	MjdJd2000 float64 = 51544.5
+)
 
 func shiftJulianToNoon(julianDays, julianFraction float64) (float64, float64) {
 	switch {
 	case -0.5 < julianFraction && julianFraction < 0.5:
 		julianFraction += 0.5
 	case julianFraction >= 0.5:
-		julianDays += 1
+		julianDays++
 		julianFraction -= 0.5
 	case julianFraction <= -0.5:
-		julianDays -= 1
+		julianDays--
 		julianFraction += 1.5
 	}
 	return julianDays, julianFraction
@@ -71,7 +75,7 @@ func doTheFliegelAndVanFlandernAlgorithm(jd int) (day, month, year int) {
 // Convert an excelTime representation (stored as a floating point number) to a time.Time.
 func timeFromExcelTime(excelTime float64, date1904 bool) time.Time {
 	var date time.Time
-	var intPart int64 = int64(excelTime)
+	var intPart = int64(excelTime)
 	// Excel uses Julian dates prior to March 1st 1900, and
 	// Gregorian thereafter.
 	if intPart <= 61 {
@@ -79,13 +83,13 @@ func timeFromExcelTime(excelTime float64, date1904 bool) time.Time {
 		const OFFSET1904 = 16480.0
 		var date time.Time
 		if date1904 {
-			date = julianDateToGregorianTime(MJD_0+OFFSET1904, excelTime)
+			date = julianDateToGregorianTime(Mjd0+OFFSET1904, excelTime)
 		} else {
-			date = julianDateToGregorianTime(MJD_0+OFFSET1900, excelTime)
+			date = julianDateToGregorianTime(Mjd0+OFFSET1900, excelTime)
 		}
 		return date
 	}
-	var floatPart float64 = excelTime - float64(intPart)
+	floatPart := excelTime - float64(intPart)
 	var dayNanoSeconds float64 = 24 * 60 * 60 * 1000 * 1000 * 1000
 	if date1904 {
 		date = time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)

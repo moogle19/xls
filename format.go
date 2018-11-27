@@ -1,5 +1,6 @@
 package xls
 
+// Format ...
 type Format struct {
 	Head struct {
 		Index uint16

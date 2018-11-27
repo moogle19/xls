@@ -1,7 +1,6 @@
 package xls
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -18,23 +17,28 @@ type contentHandler interface {
 	LastCol() uint16
 }
 
+// Col is a worksheet column
 type Col struct {
 	RowB      uint16
 	FirstColB uint16
 }
 
+// Coler defines a generic column
 type Coler interface {
 	Row() uint16
 }
 
+// Row returns the row index of the column
 func (c *Col) Row() uint16 {
 	return c.RowB
 }
 
+// FirstCol returns the first column
 func (c *Col) FirstCol() uint16 {
 	return c.FirstColB
 }
 
+// LastCol returns the last column
 func (c *Col) LastCol() uint16 {
 	return c.FirstColB
 }
@@ -43,6 +47,7 @@ func (c *Col) String(wb *WorkBook) []string {
 	return []string{"default"}
 }
 
+// XfRk ...
 type XfRk struct {
 	Index uint16
 	Rk    RK
@@ -54,18 +59,17 @@ func (xf *XfRk) String(wb *WorkBook) string {
 		fNo := wb.Xfs[idx].formatNo()
 		if fNo >= 164 { // user defined format
 			if formatter := wb.Formats[fNo]; formatter != nil {
-				if (strings.Contains(formatter.str, "#") || strings.Contains(formatter.str, ".00")){
+				if strings.Contains(formatter.str, "#") || strings.Contains(formatter.str, ".00") {
 					//If format contains # or .00 then this is a number
-					return xf.Rk.String()					
-				}else{
-					i, f, isFloat := xf.Rk.number()
-					if !isFloat {
-						f = float64(i)
-					}
-					t := timeFromExcelTime(f, wb.dateMode == 1)
-
-					return yymmdd.Format(t, formatter.str)
+					return xf.Rk.String()
 				}
+				i, f, isFloat := xf.Rk.number()
+				if !isFloat {
+					f = float64(i)
+				}
+				t := timeFromExcelTime(f, wb.dateMode == 1)
+
+				return yymmdd.Format(t, formatter.str)
 			}
 			// see http://www.openoffice.org/sc/excelfileformat.pdf Page #174
 		} else if 14 <= fNo && fNo <= 17 || fNo == 22 || 27 <= fNo && fNo <= 36 || 50 <= fNo && fNo <= 58 { // jp. date format
@@ -80,6 +84,7 @@ func (xf *XfRk) String(wb *WorkBook) string {
 	return xf.Rk.String()
 }
 
+// RK ...
 type RK uint32
 
 func (rk RK) number() (intNum int64, floatNum float64, isFloat bool) {
@@ -112,22 +117,23 @@ func (rk RK) String() string {
 	return strconv.FormatInt(i, 10)
 }
 
-var ErrIsInt = fmt.Errorf("is int")
-
+// Float returns the column value as float
 func (rk RK) Float() (float64, error) {
-	_, f, isFloat := rk.number()
+	i, f, isFloat := rk.number()
 	if !isFloat {
-		return 0, ErrIsInt
+		return float64(i), nil
 	}
 	return f, nil
 }
 
+// MulrkCol ...
 type MulrkCol struct {
 	Col
 	Xfrks    []XfRk
 	LastColB uint16
 }
 
+// LastCol returns the last column
 func (c *MulrkCol) LastCol() uint16 {
 	return c.LastColB
 }
@@ -141,12 +147,14 @@ func (c *MulrkCol) String(wb *WorkBook) []string {
 	return res
 }
 
+// MulBlankCol ...
 type MulBlankCol struct {
 	Col
 	Xfs      []uint16
 	LastColB uint16
 }
 
+// LastCol ...
 func (c *MulBlankCol) LastCol() uint16 {
 	return c.LastColB
 }
@@ -155,6 +163,7 @@ func (c *MulBlankCol) String(wb *WorkBook) []string {
 	return make([]string, len(c.Xfs))
 }
 
+// NumberCol ...
 type NumberCol struct {
 	Col
 	Index uint16
@@ -165,6 +174,7 @@ func (c *NumberCol) String(wb *WorkBook) []string {
 	return []string{strconv.FormatFloat(c.Float, 'f', -1, 64)}
 }
 
+// FormulaCol ...
 type FormulaCol struct {
 	Header struct {
 		Col
@@ -180,6 +190,7 @@ func (c *FormulaCol) String(wb *WorkBook) []string {
 	return []string{"FormulaCol"}
 }
 
+// RkCol ...
 type RkCol struct {
 	Col
 	Xfrk XfRk
@@ -189,6 +200,7 @@ func (c *RkCol) String(wb *WorkBook) []string {
 	return []string{c.Xfrk.String(wb)}
 }
 
+// LabelsstCol ...
 type LabelsstCol struct {
 	Col
 	Xf  uint16
@@ -208,6 +220,7 @@ func (c *labelCol) String(wb *WorkBook) []string {
 	return []string{c.Str}
 }
 
+// BlankCol ...
 type BlankCol struct {
 	Col
 	Xf uint16

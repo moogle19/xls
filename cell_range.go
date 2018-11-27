@@ -4,13 +4,13 @@ import (
 	"fmt"
 )
 
-// range type of multi rows
+// Ranger type of multi rows
 type Ranger interface {
 	FirstRow() uint16
 	LastRow() uint16
 }
 
-// range type of multi cells in multi rows
+// CellRange type of multi cells in multi rows
 type CellRange struct {
 	FirstRowB uint16
 	LastRowB  uint16
@@ -18,40 +18,44 @@ type CellRange struct {
 	LastColB  uint16
 }
 
+// FirstRow returns the first row index
 func (c *CellRange) FirstRow() uint16 {
 	return c.FirstRowB
 }
 
+// LastRow returns the last row index
 func (c *CellRange) LastRow() uint16 {
 	return c.LastRowB
 }
 
+// FirstCol returns the first column index
 func (c *CellRange) FirstCol() uint16 {
 	return c.FristColB
 }
 
+// LastCol returns the last column index
 func (c *CellRange) LastCol() uint16 {
 	return c.LastColB
 }
 
-//hyperlink type's content
+// HyperLink type's content
 type HyperLink struct {
 	CellRange
 	Description      string
 	TextMark         string
 	TargetFrame      string
-	Url              string
+	URL              string
 	ShortedFilePath  string
 	ExtendedFilePath string
-	IsUrl            bool
+	IsURL            bool
 }
 
 //get the hyperlink string, use the public variable Url to get the original Url
 func (h *HyperLink) String(wb *WorkBook) []string {
 	res := make([]string, h.LastColB-h.FristColB+1)
 	var str string
-	if h.IsUrl {
-		str = fmt.Sprintf("%s(%s)", h.Description, h.Url)
+	if h.IsURL {
+		str = fmt.Sprintf("%s(%s)", h.Description, h.URL)
 	} else {
 		str = h.ExtendedFilePath
 	}

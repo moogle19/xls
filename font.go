@@ -1,5 +1,6 @@
 package xls
 
+// FontInfo contains font information
 type FontInfo struct {
 	Height     uint16
 	Flag       uint16
@@ -13,6 +14,7 @@ type FontInfo struct {
 	NameB      byte
 }
 
+// Font ...
 type Font struct {
 	Info *FontInfo
 	Name string

@@ -1,5 +1,6 @@
 package xls
 
+// Xf5 ...
 type Xf5 struct {
 	Font      uint16
 	Format    uint16
@@ -15,6 +16,7 @@ func (x *Xf5) formatNo() uint16 {
 	return x.Format
 }
 
+// Xf8 ...
 type Xf8 struct {
 	Font        uint16
 	Format      uint16
@@ -32,6 +34,6 @@ func (x *Xf8) formatNo() uint16 {
 	return x.Format
 }
 
-type st_xf_data interface {
+type stXfData interface {
 	formatNo() uint16
 }

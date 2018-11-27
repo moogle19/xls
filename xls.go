@@ -7,55 +7,56 @@ import (
 	"github.com/extrame/ole2"
 )
 
-//Open one xls file
+// Open opens one xls file with the specified charset
 func Open(file string, charset string) (*WorkBook, error) {
-	if fi, err := os.Open(file); err == nil {
-		return OpenReader(fi, charset)
-	} else {
+	fi, err := os.Open(file)
+	if err != nil {
 		return nil, err
 	}
+
+	return OpenReader(fi, charset)
 }
 
-//Open one xls file and return the closer
+// OpenWithCloser opens one xls file and return the closer
 func OpenWithCloser(file string, charset string) (*WorkBook, io.Closer, error) {
-	if fi, err := os.Open(file); err == nil {
-		wb, err := OpenReader(fi, charset)
-		return wb, fi, err
-	} else {
+	fi, err := os.Open(file)
+	if err != nil {
 		return nil, nil, err
 	}
+	wb, err := OpenReader(fi, charset)
+	return wb, fi, err
 }
 
-//Open xls file from reader
+// OpenReader opens a xls file from reader
 func OpenReader(reader io.ReadSeeker, charset string) (wb *WorkBook, err error) {
-	var ole *ole2.Ole
-	if ole, err = ole2.Open(reader, charset); err == nil {
-		var dir []*ole2.File
-		if dir, err = ole.ListDir(); err == nil {
-			var book *ole2.File
-			var root *ole2.File
-			for _, file := range dir {
-				name := file.Name()
-				if name == "Workbook" {
-					if book == nil {
-						book = file
-					}
-					//book = file
-					// break
-				}
-				if name == "Book" {
-					book = file
-					// break
-				}
-				if name == "Root Entry" {
-					root = file
-				}
-			}
-			if book != nil {
-				wb = newWorkBookFromOle2(ole.OpenFile(book, root))
-				return
-			}
+	ole, err := ole2.Open(reader, charset)
+	if err != nil {
+		return nil, err
+	}
+
+	dir, err := ole.ListDir()
+	if err != nil {
+		return nil, err
+	}
+
+	var book *ole2.File
+	var root *ole2.File
+	for _, file := range dir {
+		name := file.Name()
+		if name == "Workbook" && book == nil {
+			book = file
+		}
+		if name == "Book" {
+			book = file
+			// break
+		}
+		if name == "Root Entry" {
+			root = file
 		}
 	}
-	return
+	if book == nil {
+		return wb, nil
+	}
+	return newWorkBookFromOle2(ole.OpenFile(book, root))
+
 }

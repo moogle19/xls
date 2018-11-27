@@ -25,6 +25,7 @@ type WorkSheet struct {
 	parsed bool
 }
 
+// Row returns the row at the specified index
 func (w *WorkSheet) Row(i int) *Row {
 	row := w.rows[uint16(i)]
 	if row != nil {
@@ -33,14 +34,17 @@ func (w *WorkSheet) Row(i int) *Row {
 	return row
 }
 
-func (w *WorkSheet) parse(buf io.ReadSeeker) {
+func (w *WorkSheet) parse(buf io.ReadSeeker) error {
 	w.rows = make(map[uint16]*Row)
 	b := new(bof)
-	var bof_pre *bof
+	var preBof *bof
 	for {
 		if err := binary.Read(buf, binary.LittleEndian, b); err == nil {
-			bof_pre = w.parseBof(buf, b, bof_pre)
-			if b.Id == 0xa {
+			preBof, err = w.parseBof(buf, b, preBof)
+			if err != nil {
+				return err
+			}
+			if b.ID == 0xa {
 				break
 			}
 		} else {
@@ -49,26 +53,32 @@ func (w *WorkSheet) parse(buf io.ReadSeeker) {
 		}
 	}
 	w.parsed = true
+	return nil
 }
 
-func (w *WorkSheet) parseBof(buf io.ReadSeeker, b *bof, pre *bof) *bof {
+func (w *WorkSheet) parseBof(buf io.ReadSeeker, b *bof, pre *bof) (*bof, error) {
 	var col interface{}
-	switch b.Id {
-	// case 0x0E5: //MERGEDCELLS
-	// ws.mergedCells(buf)
+	var err error
+	switch b.ID {
 	case 0x208: //ROW
 		r := new(rowInfo)
-		binary.Read(buf, binary.LittleEndian, r)
+		if err := binary.Read(buf, binary.LittleEndian, r); err != nil {
+			return nil, err
+		}
 		w.addRow(r)
 	case 0x0BD: //MULRK
 		mc := new(MulrkCol)
 		size := (b.Size - 6) / 6
-		binary.Read(buf, binary.LittleEndian, &mc.Col)
+		if err := binary.Read(buf, binary.LittleEndian, &mc.Col); err != nil {
+			return nil, err
+		}
 		mc.Xfrks = make([]XfRk, size)
 		for i := uint16(0); i < size; i++ {
 			binary.Read(buf, binary.LittleEndian, &mc.Xfrks[i])
 		}
-		binary.Read(buf, binary.LittleEndian, &mc.LastColB)
+		if err := binary.Read(buf, binary.LittleEndian, &mc.LastColB); err != nil {
+			return nil, err
+		}
 		col = mc
 	case 0x0BE: //MULBLANK
 		mc := new(MulBlankCol)
@@ -76,78 +86,139 @@ func (w *WorkSheet) parseBof(buf io.ReadSeeker, b *bof, pre *bof) *bof {
 		binary.Read(buf, binary.LittleEndian, &mc.Col)
 		mc.Xfs = make([]uint16, size)
 		for i := uint16(0); i < size; i++ {
-			binary.Read(buf, binary.LittleEndian, &mc.Xfs[i])
+			if err := binary.Read(buf, binary.LittleEndian, &mc.Xfs[i]); err != nil {
+				return nil, err
+			}
 		}
-		binary.Read(buf, binary.LittleEndian, &mc.LastColB)
+		if err := binary.Read(buf, binary.LittleEndian, &mc.LastColB); err != nil {
+			return nil, err
+		}
 		col = mc
 	case 0x203: //NUMBER
 		col = new(NumberCol)
-		binary.Read(buf, binary.LittleEndian, col)
+		if err := binary.Read(buf, binary.LittleEndian, col); err != nil {
+			return nil, err
+		}
 	case 0x06: //FORMULA
 		c := new(FormulaCol)
-		binary.Read(buf, binary.LittleEndian, &c.Header)
+		if err := binary.Read(buf, binary.LittleEndian, &c.Header); err != nil {
+			return nil, err
+		}
 		c.Bts = make([]byte, b.Size-20)
-		binary.Read(buf, binary.LittleEndian, &c.Bts)
+		if err := binary.Read(buf, binary.LittleEndian, &c.Bts); err != nil {
+			return nil, err
+		}
 		col = c
 	case 0x27e: //RK
 		col = new(RkCol)
-		binary.Read(buf, binary.LittleEndian, col)
+		if err := binary.Read(buf, binary.LittleEndian, col); err != nil {
+			return nil, err
+		}
 	case 0xFD: //LABELSST
 		col = new(LabelsstCol)
-		binary.Read(buf, binary.LittleEndian, col)
+		if err := binary.Read(buf, binary.LittleEndian, col); err != nil {
+			return nil, err
+		}
 	case 0x204:
 		c := new(labelCol)
-		binary.Read(buf, binary.LittleEndian, &c.BlankCol)
+		if err := binary.Read(buf, binary.LittleEndian, &c.BlankCol); err != nil {
+			return nil, err
+		}
 		var count uint16
-		binary.Read(buf, binary.LittleEndian, &count)
-		c.Str, _ = w.wb.get_string(buf, count)
+		if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
+			return nil, err
+		}
+		c.Str, err = w.wb.getString(buf, count)
+		if err != nil {
+			return nil, err
+		}
 		col = c
 	case 0x201: //BLANK
 		col = new(BlankCol)
-		binary.Read(buf, binary.LittleEndian, col)
+		if err := binary.Read(buf, binary.LittleEndian, col); err != nil {
+			return nil, err
+		}
 	case 0x1b8: //HYPERLINK
 		var hy HyperLink
-		binary.Read(buf, binary.LittleEndian, &hy.CellRange)
+		if err := binary.Read(buf, binary.LittleEndian, &hy.CellRange); err != nil {
+			return nil, err
+		}
 		buf.Seek(20, 1)
 		var flag uint32
-		binary.Read(buf, binary.LittleEndian, &flag)
+		if err := binary.Read(buf, binary.LittleEndian, &flag); err != nil {
+			return nil, err
+		}
 		var count uint32
 
 		if flag&0x14 != 0 {
-			binary.Read(buf, binary.LittleEndian, &count)
-			hy.Description = b.utf16String(buf, count)
+			if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
+				return nil, err
+			}
+			hy.Description, err = b.utf16String(buf, count)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if flag&0x80 != 0 {
-			binary.Read(buf, binary.LittleEndian, &count)
-			hy.TargetFrame = b.utf16String(buf, count)
+			if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
+				return nil, err
+			}
+			hy.TargetFrame, err = b.utf16String(buf, count)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if flag&0x1 != 0 {
 			var guid [2]uint64
-			binary.Read(buf, binary.BigEndian, &guid)
+			if err := binary.Read(buf, binary.BigEndian, &guid); err != nil {
+				return nil, err
+			}
 			if guid[0] == 0xE0C9EA79F9BACE11 && guid[1] == 0x8C8200AA004BA90B { //URL
-				hy.IsUrl = true
-				binary.Read(buf, binary.LittleEndian, &count)
-				hy.Url = b.utf16String(buf, count/2)
+				hy.IsURL = true
+				if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
+					return nil, err
+				}
+				hy.URL, err = b.utf16String(buf, count/2)
+				if err != nil {
+					return nil, err
+				}
 			} else if guid[0] == 0x303000000000000 && guid[1] == 0xC000000000000046 { //URL{
 				var upCount uint16
-				binary.Read(buf, binary.LittleEndian, &upCount)
-				binary.Read(buf, binary.LittleEndian, &count)
+				if err := binary.Read(buf, binary.LittleEndian, &upCount); err != nil {
+					return nil, err
+				}
+				if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
+					return nil, err
+				}
 				bts := make([]byte, count)
-				binary.Read(buf, binary.LittleEndian, &bts)
+				if err := binary.Read(buf, binary.LittleEndian, &bts); err != nil {
+					return nil, err
+				}
 				hy.ShortedFilePath = string(bts)
 				buf.Seek(24, 1)
-				binary.Read(buf, binary.LittleEndian, &count)
+				if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
+					return nil, err
+				}
 				if count > 0 {
-					binary.Read(buf, binary.LittleEndian, &count)
+					if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
+						return nil, err
+					}
 					buf.Seek(2, 1)
-					hy.ExtendedFilePath = b.utf16String(buf, count/2+1)
+					hy.ExtendedFilePath, err = b.utf16String(buf, count/2+1)
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
 		if flag&0x8 != 0 {
-			binary.Read(buf, binary.LittleEndian, &count)
+			if err := binary.Read(buf, binary.LittleEndian, &count); err != nil {
+				return nil, err
+			}
 			var bts = make([]uint16, count)
-			binary.Read(buf, binary.LittleEndian, &bts)
+			if err := binary.Read(buf, binary.LittleEndian, &bts); err != nil {
+				return nil, err
+			}
 			runes := utf16.Decode(bts[:len(bts)-1])
 			hy.TextMark = string(runes)
 		}
@@ -163,7 +234,7 @@ func (w *WorkSheet) parseBof(buf io.ReadSeeker, b *bof, pre *bof) *bof {
 	if col != nil {
 		w.add(col)
 	}
-	return b
+	return b, nil
 }
 
 func (w *WorkSheet) add(content interface{}) {
@@ -186,12 +257,12 @@ func (w *WorkSheet) addRange(rang Ranger, ch contentHandler) {
 	}
 }
 
-func (w *WorkSheet) addContent(row_num uint16, ch contentHandler) {
+func (w *WorkSheet) addContent(rowNo uint16, ch contentHandler) {
 	var row *Row
 	var ok bool
-	if row, ok = w.rows[row_num]; !ok {
+	if row, ok = w.rows[rowNo]; !ok {
 		info := new(rowInfo)
-		info.Index = row_num
+		info.Index = rowNo
 		row = w.addRow(info)
 	}
 	row.cols[ch.FirstCol()] = ch

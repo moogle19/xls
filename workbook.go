@@ -6,59 +6,67 @@ import (
 	"io"
 	"os"
 	"unicode/utf16"
+
 	"golang.org/x/text/encoding/charmap"
 )
 
-//xls workbook type
+// WorkBook contains an Excel workbook
 type WorkBook struct {
 	Is5ver   bool
 	Type     uint16
 	Codepage uint16
-	Xfs      []st_xf_data
+	Xfs      []stXfData
 	Fonts    []Font
 	Formats  map[uint16]*Format
 	//All the sheets from the workbook
-	sheets         []*WorkSheet
-	Author         string
-	rs             io.ReadSeeker
-	sst            []string
-	continue_utf16 uint16
-	continue_rich  uint16
-	continue_apsb  uint32
-	dateMode       uint16
+	sheets        []*WorkSheet
+	Author        string
+	rs            io.ReadSeeker
+	sst           []string
+	continueUTF16 uint16
+	continueRich  uint16
+	continueAPSB  uint32
+	dateMode      uint16
 }
 
 //read workbook from ole2 file
-func newWorkBookFromOle2(rs io.ReadSeeker) *WorkBook {
-	wb := new(WorkBook)
-	wb.Formats = make(map[uint16]*Format)
-	// wb.bts = bts
-	wb.rs = rs
-	wb.sheets = make([]*WorkSheet, 0)
-	wb.Parse(rs)
-	return wb
+func newWorkBookFromOle2(rs io.ReadSeeker) (*WorkBook, error) {
+	wb := &WorkBook{
+		Formats: make(map[uint16]*Format),
+		rs:      rs,
+		sheets:  make([]*WorkSheet, 0),
+	}
+	if err := wb.Parse(rs); err != nil {
+		return nil, err
+	}
+	return wb, nil
 }
 
-func (w *WorkBook) Parse(buf io.ReadSeeker) {
+// Parse parses the given reader into the workbook
+func (w *WorkBook) Parse(buf io.Reader) error {
 	b := new(bof)
-	bof_pre := new(bof)
-	// buf := bytes.NewReader(bts)
+	preBof := new(bof)
 	offset := 0
 	for {
 		if err := binary.Read(buf, binary.LittleEndian, b); err == nil {
-			bof_pre, b, offset = w.parseBof(buf, b, bof_pre, offset)
+			preBof, b, offset, err = w.parseBof(buf, b, preBof, offset)
+			if err != nil {
+				return err
+			}
+
 		} else {
 			break
 		}
 	}
+	return nil
 }
 
-func (w *WorkBook) addXf(xf st_xf_data) {
+func (w *WorkBook) addXf(xf stXfData) {
 	w.Xfs = append(w.Xfs, xf)
 }
 
-func (w *WorkBook) addFont(font *FontInfo, buf io.ReadSeeker) {
-	name, _ := w.get_string(buf, uint16(font.NameB))
+func (w *WorkBook) addFont(font *FontInfo, buf io.Reader) {
+	name, _ := w.getString(buf, uint16(font.NameB))
 	w.Fonts = append(w.Fonts, Font{Info: font, Name: name})
 }
 
@@ -69,125 +77,156 @@ func (w *WorkBook) addFormat(format *Format) {
 	w.Formats[format.Head.Index] = format
 }
 
-func (wb *WorkBook) parseBof(buf io.ReadSeeker, b *bof, pre *bof, offset_pre int) (after *bof, after_using *bof, offset int) {
+func (w *WorkBook) parseBof(buf io.Reader, b *bof, pre *bof, preOffset int) (after *bof, afterUsing *bof, offset int, err error) {
 	after = b
-	after_using = pre
+	afterUsing = pre
 	var bts = make([]byte, b.Size)
-	binary.Read(buf, binary.LittleEndian, bts)
-	buf_item := bytes.NewReader(bts)
-	switch b.Id {
+	if err := binary.Read(buf, binary.LittleEndian, bts); err != nil {
+		return nil, nil, 0, err
+	}
+	bufItem := bytes.NewReader(bts)
+	switch b.ID {
 	case 0x809:
 		bif := new(biffHeader)
-		binary.Read(buf_item, binary.LittleEndian, bif)
-		if bif.Ver != 0x600 {
-			wb.Is5ver = true
+		if err := binary.Read(bufItem, binary.LittleEndian, bif); err != nil {
+			return nil, nil, 0, err
 		}
-		wb.Type = bif.Type
+
+		if bif.Ver != 0x600 {
+			w.Is5ver = true
+		}
+		w.Type = bif.Type
 	case 0x042: // CODEPAGE
-		binary.Read(buf_item, binary.LittleEndian, &wb.Codepage)
+		if err := binary.Read(bufItem, binary.LittleEndian, &w.Codepage); err != nil {
+			return nil, nil, 0, err
+		}
 	case 0x3c: // CONTINUE
-		if pre.Id == 0xfc {
+		if pre.ID == 0xfc {
 			var size uint16
 			var err error
-			if wb.continue_utf16 >= 1 {
-				size = wb.continue_utf16
-				wb.continue_utf16 = 0
+			if w.continueUTF16 >= 1 {
+				size = w.continueUTF16
+				w.continueUTF16 = 0
 			} else {
-				err = binary.Read(buf_item, binary.LittleEndian, &size)
+				if err := binary.Read(bufItem, binary.LittleEndian, &size); err != nil {
+					return nil, nil, 0, err
+				}
 			}
-			for err == nil && offset_pre < len(wb.sst) {
+			for err == nil && preOffset < len(w.sst) {
 				var str string
 				if size > 0 {
-					str, err = wb.get_string(buf_item, size)
-					wb.sst[offset_pre] = wb.sst[offset_pre] + str
+					str, err = w.getString(bufItem, size)
+					w.sst[preOffset] = w.sst[preOffset] + str
 				}
 
 				if err == io.EOF {
 					break
+				} else if err != nil {
+					return nil, nil, 0, err
 				}
 
-				offset_pre++
-				err = binary.Read(buf_item, binary.LittleEndian, &size)
+				preOffset++
+				if err := binary.Read(bufItem, binary.LittleEndian, &size); err != nil {
+					return nil, nil, 0, err
+				}
 			}
 		}
-		offset = offset_pre
+		offset = preOffset
 		after = pre
-		after_using = b
+		afterUsing = b
 	case 0xfc: // SST
 		info := new(SstInfo)
-		binary.Read(buf_item, binary.LittleEndian, info)
-		wb.sst = make([]string, info.Count)
+		if err := binary.Read(bufItem, binary.LittleEndian, info); err != nil {
+			return nil, nil, 0, err
+		}
+		w.sst = make([]string, info.Count)
 		var size uint16
 		var i = 0
 		for ; i < int(info.Count); i++ {
 			var err error
-			if err = binary.Read(buf_item, binary.LittleEndian, &size); err == nil {
+			if err = binary.Read(bufItem, binary.LittleEndian, &size); err == nil {
 				var str string
-				str, err = wb.get_string(buf_item, size)
-				wb.sst[i] = wb.sst[i] + str
+				str, err = w.getString(bufItem, size)
+				w.sst[i] = w.sst[i] + str
 			}
 
 			if err == io.EOF {
 				break
+			} else if err != nil {
+				return nil, nil, 0, err
 			}
 		}
 		offset = i
 	case 0x85: // bOUNDSHEET
 		var bs = new(boundsheet)
-		binary.Read(buf_item, binary.LittleEndian, bs)
+		if err := binary.Read(bufItem, binary.LittleEndian, bs); err != nil {
+			return nil, nil, 0, err
+		}
 		// different for BIFF5 and BIFF8
-		wb.addSheet(bs, buf_item)
+		w.addSheet(bs, bufItem)
 	case 0x0e0: // XF
-		if wb.Is5ver {
+		if w.Is5ver {
 			xf := new(Xf5)
-			binary.Read(buf_item, binary.LittleEndian, xf)
-			wb.addXf(xf)
+			if err := binary.Read(bufItem, binary.LittleEndian, xf); err != nil {
+				return nil, nil, 0, err
+			}
+			w.addXf(xf)
 		} else {
 			xf := new(Xf8)
-			binary.Read(buf_item, binary.LittleEndian, xf)
-			wb.addXf(xf)
+			if err := binary.Read(bufItem, binary.LittleEndian, xf); err != nil {
+				return nil, nil, 0, err
+			}
+			w.addXf(xf)
 		}
 	case 0x031: // FONT
 		f := new(FontInfo)
-		binary.Read(buf_item, binary.LittleEndian, f)
-		wb.addFont(f, buf_item)
+		if err := binary.Read(bufItem, binary.LittleEndian, f); err != nil {
+			return nil, nil, 0, err
+		}
+		w.addFont(f, bufItem)
 	case 0x41E: //FORMAT
 		font := new(Format)
-		binary.Read(buf_item, binary.LittleEndian, &font.Head)
-		font.str, _ = wb.get_string(buf_item, font.Head.Size)
-		wb.addFormat(font)
+		if err := binary.Read(bufItem, binary.LittleEndian, &font.Head); err != nil {
+			return nil, nil, 0, err
+		}
+		font.str, err = w.getString(bufItem, font.Head.Size)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		w.addFormat(font)
 	case 0x22: //DATEMODE
-		binary.Read(buf_item, binary.LittleEndian, &wb.dateMode)
+		if err := binary.Read(bufItem, binary.LittleEndian, &w.dateMode); err != nil {
+			return nil, nil, 0, err
+		}
 	}
 	return
 }
 func decodeWindows1251(enc []byte) string {
-    dec := charmap.Windows1251.NewDecoder()
-    out, _ := dec.Bytes(enc)
-    return string(out)
+	dec := charmap.Windows1251.NewDecoder()
+	out, _ := dec.Bytes(enc)
+	return string(out)
 }
-func (w *WorkBook) get_string(buf io.ReadSeeker, size uint16) (res string, err error) {
+func (w *WorkBook) getString(buf io.Reader, size uint16) (res string, err error) {
 	if w.Is5ver {
 		var bts = make([]byte, size)
 		_, err = buf.Read(bts)
 		res = decodeWindows1251(bts)
-		//res = string(bts)
 	} else {
-		var richtext_num = uint16(0)
-		var phonetic_size = uint32(0)
+		var richtextNum = uint16(0)
+		var phoneticSize = uint32(0)
 		var flag byte
 		err = binary.Read(buf, binary.LittleEndian, &flag)
 		if flag&0x8 != 0 {
-			err = binary.Read(buf, binary.LittleEndian, &richtext_num)
-		} else if w.continue_rich > 0 {
-			richtext_num = w.continue_rich
-			w.continue_rich = 0
+			err = binary.Read(buf, binary.LittleEndian, &richtextNum)
+		} else if w.continueRich > 0 {
+			richtextNum = w.continueRich
+			w.continueRich = 0
 		}
 		if flag&0x4 != 0 {
-			err = binary.Read(buf, binary.LittleEndian, &phonetic_size)
-		} else if w.continue_apsb > 0 {
-			phonetic_size = w.continue_apsb
-			w.continue_apsb = 0
+			err = binary.Read(buf, binary.LittleEndian, &phoneticSize)
+		} else if w.continueAPSB > 0 {
+			phoneticSize = w.continueAPSB
+			w.continueAPSB = 0
 		}
 		if flag&0x1 != 0 {
 			var bts = make([]uint16, size)
@@ -198,14 +237,14 @@ func (w *WorkBook) get_string(buf io.ReadSeeker, size uint16) (res string, err e
 			runes := utf16.Decode(bts[:i])
 			res = string(runes)
 			if i < size {
-				w.continue_utf16 = size - i + 1
+				w.continueUTF16 = size - i + 1
 			}
 		} else {
 			var bts = make([]byte, size)
 			var n int
 			n, err = buf.Read(bts)
 			if uint16(n) < size {
-				w.continue_utf16 = size - uint16(n)
+				w.continueUTF16 = size - uint16(n)
 				err = io.EOF
 			}
 
@@ -216,36 +255,33 @@ func (w *WorkBook) get_string(buf io.ReadSeeker, size uint16) (res string, err e
 			runes := utf16.Decode(bts1)
 			res = string(runes)
 		}
-		if richtext_num > 0 {
+		if richtextNum > 0 {
 			var bts []byte
-			var seek_size int64
+			var seekSize int64
 			if w.Is5ver {
-				seek_size = int64(2 * richtext_num)
+				seekSize = int64(2 * richtextNum)
 			} else {
-				seek_size = int64(4 * richtext_num)
+				seekSize = int64(4 * richtextNum)
 			}
-			bts = make([]byte, seek_size)
+			bts = make([]byte, seekSize)
 			err = binary.Read(buf, binary.LittleEndian, bts)
 			if err == io.EOF {
-				w.continue_rich = richtext_num
+				w.continueRich = richtextNum
 			}
-
-			// err = binary.Read(buf, binary.LittleEndian, bts)
 		}
-		if phonetic_size > 0 {
-			var bts []byte
-			bts = make([]byte, phonetic_size)
+		if phoneticSize > 0 {
+			bts := make([]byte, phoneticSize)
 			err = binary.Read(buf, binary.LittleEndian, bts)
 			if err == io.EOF {
-				w.continue_apsb = phonetic_size
+				w.continueAPSB = phoneticSize
 			}
 		}
 	}
 	return
 }
 
-func (w *WorkBook) addSheet(sheet *boundsheet, buf io.ReadSeeker) {
-	name, _ := w.get_string(buf, uint16(sheet.Name))
+func (w *WorkBook) addSheet(sheet *boundsheet, buf io.Reader) {
+	name, _ := w.getString(buf, uint16(sheet.Name))
 	w.sheets = append(w.sheets, &WorkSheet{bs: sheet, Name: name, wb: w})
 }
 
@@ -255,27 +291,26 @@ func (w *WorkBook) prepareSheet(sheet *WorkSheet) {
 	sheet.parse(w.rs)
 }
 
-//Get one sheet by its number
+// GetSheet gets one sheet by its number
 func (w *WorkBook) GetSheet(num int) *WorkSheet {
-	if num < len(w.sheets) {
-		s := w.sheets[num]
-		if !s.parsed {
-			w.prepareSheet(s)
-		}
-		return s
-	} else {
+	if num >= len(w.sheets) {
 		return nil
 	}
+	s := w.sheets[num]
+	if !s.parsed {
+		w.prepareSheet(s)
+	}
+	return s
 }
 
-//Get the number of all sheets, look into example
+// NumSheets gets the number of all sheets
 func (w *WorkBook) NumSheets() int {
 	return len(w.sheets)
 }
 
-//helper function to read all cells from file
-//Notice: the max value is the limit of the max capacity of lines.
-//Warning: the helper function will need big memeory if file is large.
+// ReadAllCells is a helper function to read all cells from file
+// Notice: the max value is the limit of the max capacity of lines.
+// Warning: the helper function will need big memeory if file is large.
 func (w *WorkBook) ReadAllCells(max int) (res [][]string) {
 	res = make([][]string, 0)
 	for _, sheet := range w.sheets {
